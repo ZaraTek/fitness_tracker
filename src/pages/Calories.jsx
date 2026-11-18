@@ -55,6 +55,19 @@ export default function Calories({ settings, saveSettings }) {
     return data
   }
 
+  async function update(id, form) {
+    const fields = { name: form.name || 'Food' }
+    for (const k of NUM) fields[k] = Number(form[k]) || 0
+    fields.calories = Math.round(fields.calories) // integer column
+    const { data, error } = await supabase.from('food_entries').update(fields).eq('id', id).select().single()
+    if (error) {
+      setError(explain(error))
+      return false
+    }
+    setEntries((all) => all.map((x) => (x.id === id ? data : x)))
+    return true
+  }
+
   async function remove(id) {
     const { error } = await supabase.from('food_entries').delete().eq('id', id)
     if (error) {
@@ -105,25 +118,7 @@ export default function Calories({ settings, saveSettings }) {
       <AddFood onSave={save} />
 
       {entries.map((e) => (
-        <div className="card" key={e.id}>
-          <div className="row">
-            <h3>{e.name}</h3>
-            <button className="link danger" onClick={() => remove(e.id)}>✕</button>
-          </div>
-          <p className="muted small">
-            {e.calories} kcal · P {Number(e.protein)} · C {Number(e.carbs)} · F {Number(e.fat)}
-          </p>
-          <details>
-            <summary className="muted small">Nutrients</summary>
-            <div className="nutrient-list small">
-              {MICROS.map((m) => (
-                <span key={m.key}>
-                  {m.label} <b className="plain">{fmtAmount(Number(e[m.key]) || 0)} {m.unit}</b>
-                </span>
-              ))}
-            </div>
-          </details>
-        </div>
+        <EntryCard key={e.id} entry={e} onUpdate={(form) => update(e.id, form)} onRemove={() => remove(e.id)} />
       ))}
 
       <Goals settings={settings} saveSettings={saveSettings} />
@@ -138,6 +133,75 @@ function Bar({ value, max, goal = false }) {
   return (
     <div className="bar">
       <div style={{ width: pct + '%' }} className={cls} />
+    </div>
+  )
+}
+
+function EntryCard({ entry, onUpdate, onRemove }) {
+  const [form, setForm] = useState(null) // non-null while editing
+  const [busy, setBusy] = useState(false)
+  const set = (k) => (ev) => setForm({ ...form, [k]: ev.target.value })
+
+  function startEdit() {
+    setForm(Object.fromEntries(['name', ...NUM].map((k) => [k, String(k === 'name' ? entry.name : Number(entry[k]) || 0)])))
+  }
+
+  async function save(ev) {
+    ev.preventDefault()
+    setBusy(true)
+    if (await onUpdate(form)) setForm(null)
+    setBusy(false)
+  }
+
+  if (form) {
+    return (
+      <form className="card" onSubmit={save}>
+        <input value={form.name} onChange={set('name')} placeholder="Name" required />
+        <div className="grid3">
+          <label>Calories<input type="number" inputMode="decimal" step="any" value={form.calories} onChange={set('calories')} /></label>
+          <label>Protein g<input type="number" inputMode="decimal" step="any" value={form.protein} onChange={set('protein')} /></label>
+          <label>Carbs g<input type="number" inputMode="decimal" step="any" value={form.carbs} onChange={set('carbs')} /></label>
+          <label>Fat g<input type="number" inputMode="decimal" step="any" value={form.fat} onChange={set('fat')} /></label>
+        </div>
+        <p className="muted small">Micronutrients</p>
+        <div className="grid3">
+          {MICROS.map((m) => (
+            <label key={m.key}>
+              {m.label} {m.unit}
+              <input type="number" inputMode="decimal" step="any" value={form[m.key]} onChange={set(m.key)} />
+            </label>
+          ))}
+        </div>
+        <div className="row">
+          <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+          <button type="button" className="link" onClick={() => setForm(null)} disabled={busy}>Cancel</button>
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <div className="card">
+      <div className="row">
+        <h3>{entry.name}</h3>
+        <div className="entry-actions">
+          <button className="link" onClick={startEdit}>Edit</button>
+          <button className="link danger" onClick={onRemove} aria-label="Delete">✕</button>
+        </div>
+      </div>
+      <p className="muted small">
+        {entry.calories} kcal · P {Number(entry.protein)} · C {Number(entry.carbs)} · F {Number(entry.fat)}
+      </p>
+      <details>
+        <summary className="muted small">Nutrients</summary>
+        <div className="nutrient-list small">
+          {MICROS.map((m) => (
+            <span key={m.key}>
+              {m.label} <b className="plain">{fmtAmount(Number(entry[m.key]) || 0)} {m.unit}</b>
+            </span>
+          ))}
+        </div>
+      </details>
     </div>
   )
 }
