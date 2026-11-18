@@ -15,7 +15,7 @@ const SYSTEM = `You are a friendly nutrition assistant inside a calorie tracker.
 - "action": "log" when the user tells you about food they ate (add the items); "replace" when they correct food you already logged in this chat (your items fully replace the last logged set); "none" when you only ask a clarifying question or chat (items must be empty).
 - Prefer logging with reasonable assumptions over asking questions. Ask only if you genuinely cannot estimate.
 - If the user gives their own numbers (calories, protein, etc.), use them exactly and estimate only the missing values.
-- Units: calories kcal; protein/carbs/fat/fiber/sugar grams; sodium mg. Use numbers, never ranges.
+- Units: calories kcal; protein/carbs/fat/fiber/sugar/saturated_fat grams; sodium/cholesterol/potassium/calcium/iron/magnesium/vitamin_c mg; vitamin_d mcg. Use numbers, never ranges. Estimate every nutrient from typical values for the foods; use 0 only when a food genuinely contains none.
 - Do not give medical advice. You may comment briefly on how the meal fits their remaining calories when context is provided.`
 
 const TOOL = {
@@ -39,8 +39,19 @@ const TOOL = {
             fiber: { type: 'number' },
             sugar: { type: 'number' },
             sodium: { type: 'number' },
+            saturated_fat: { type: 'number' },
+            cholesterol: { type: 'number' },
+            potassium: { type: 'number' },
+            calcium: { type: 'number' },
+            iron: { type: 'number' },
+            magnesium: { type: 'number' },
+            vitamin_c: { type: 'number' },
+            vitamin_d: { type: 'number' },
           },
-          required: ['name', 'calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium'],
+          required: [
+            'name', 'calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium',
+            'saturated_fat', 'cholesterol', 'potassium', 'calcium', 'iron', 'magnesium', 'vitamin_c', 'vitamin_d',
+          ],
         },
       },
     },
@@ -82,22 +93,30 @@ Deno.serve(async (req) => {
       // The API requires the conversation to start with a user turn.
       .filter((_, i, arr) => arr.findIndex((x) => x.role === 'user') <= i)
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5-5',
-        max_tokens: 8000,
-        system: SYSTEM + (context ? `\n\nUser's day so far: ${context}` : ''),
-        tools: [TOOL],
-        messages: apiMessages,
-      }),
-    })
-    const data = await res.json()
+    const call = async () => {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5-5',
+          max_tokens: 8000,
+          system: SYSTEM + (context ? `\n\nUser's day so far: ${context}` : ''),
+          tools: [TOOL],
+          messages: apiMessages,
+        }),
+      })
+      return { res, data: await res.json() }
+    }
+    const hasTool = (d: { content?: { type: string }[] }) => d.content?.some((c) => c.type === 'tool_use')
+
+    // This model can't be forced to use the tool, and occasionally answers in plain text
+    // (claiming it logged food without returning items). Retry once when that happens.
+    let { res, data } = await call()
+    if (res.ok && data.stop_reason !== 'max_tokens' && !hasTool(data)) ({ res, data } = await call())
     if (!res.ok) return json({ error: data?.error?.message ?? 'Anthropic API error' }, 502)
 
     // A cut-off response has a truncated tool input, so never treat it as a real answer.

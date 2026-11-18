@@ -75,6 +75,15 @@ create table if not exists food_entries (
   sodium numeric not null default 0, -- mg
   created_at timestamptz not null default now()
 );
+-- 002_micros
+alter table food_entries add column if not exists saturated_fat numeric not null default 0; -- g
+alter table food_entries add column if not exists cholesterol numeric not null default 0;   -- mg
+alter table food_entries add column if not exists potassium numeric not null default 0;     -- mg
+alter table food_entries add column if not exists calcium numeric not null default 0;       -- mg
+alter table food_entries add column if not exists iron numeric not null default 0;          -- mg
+alter table food_entries add column if not exists magnesium numeric not null default 0;     -- mg
+alter table food_entries add column if not exists vitamin_c numeric not null default 0;     -- mg
+alter table food_entries add column if not exists vitamin_d numeric not null default 0;     -- mcg
 alter table food_entries enable row level security;
 drop policy if exists "own food" on food_entries;
 create policy "own food" on food_entries

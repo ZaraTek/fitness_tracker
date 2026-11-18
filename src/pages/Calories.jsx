@@ -3,9 +3,11 @@ import { supabase, explain } from '../supabase'
 import { toDateStr, addDays, prettyDate } from '../dates'
 import { resizeToBase64 } from '../image'
 import FoodChat from './FoodChat'
+import { MICROS, ALL_NUMERIC, BASE_NUMERIC } from '../nutrients'
 
-const EMPTY = { name: '', calories: '', protein: '', carbs: '', fat: '', fiber: '', sugar: '', sodium: '' }
-const NUM = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium']
+const NUM = ALL_NUMERIC
+const EMPTY = Object.fromEntries(['name', ...NUM].map((k) => [k, '']))
+const MIGRATION_HINT = 'Micronutrients weren’t saved: run supabase/002_micros.sql in the Supabase SQL Editor.'
 
 
 export default function Calories({ settings, saveSettings }) {
@@ -30,7 +32,7 @@ export default function Calories({ settings, saveSettings }) {
 
   const total = useMemo(() => {
     const t = Object.fromEntries(NUM.map((k) => [k, 0]))
-    for (const e of entries) for (const k of NUM) t[k] += Number(e[k])
+    for (const e of entries) for (const k of NUM) t[k] += Number(e[k]) || 0 // new columns may be missing
     return t
   }, [entries])
 
@@ -38,7 +40,13 @@ export default function Calories({ settings, saveSettings }) {
     const row = { date, name: form.name || 'Food' }
     for (const k of NUM) row[k] = Number(form[k]) || 0
     row.calories = Math.round(row.calories) // integer column
-    const { data, error } = await supabase.from('food_entries').insert(row).select().single()
+    let { data, error } = await supabase.from('food_entries').insert(row).select().single()
+    if (error?.code === 'PGRST204') {
+      // Micronutrient columns not migrated yet: save the basics and say how to fix it.
+      const basic = Object.fromEntries(Object.entries(row).filter(([k]) => k === 'date' || k === 'name' || BASE_NUMERIC.includes(k)))
+      ;({ data, error } = await supabase.from('food_entries').insert(basic).select().single())
+      if (!error) setError(MIGRATION_HINT)
+    }
     if (error) {
       setError(explain(error))
       return null
@@ -85,10 +93,9 @@ export default function Calories({ settings, saveSettings }) {
         <MacroRow label="Protein" v={total.protein} t={settings.protein_target} />
         <MacroRow label="Carbs" v={total.carbs} t={settings.carb_target} />
         <MacroRow label="Fat" v={total.fat} t={settings.fat_target} />
-        <p className="muted small">
-          Fiber {Math.round(total.fiber)} g · Sugar {Math.round(total.sugar)} g · Sodium {Math.round(total.sodium)} mg
-        </p>
       </div>
+
+      <Micros total={total} />
 
       <FoodChat
         onSave={save}
@@ -106,6 +113,16 @@ export default function Calories({ settings, saveSettings }) {
           <p className="muted small">
             {e.calories} kcal · P {Number(e.protein)} · C {Number(e.carbs)} · F {Number(e.fat)}
           </p>
+          <details>
+            <summary className="muted small">Nutrients</summary>
+            <div className="nutrient-list small">
+              {MICROS.map((m) => (
+                <span key={m.key}>
+                  {m.label} <b className="plain">{fmtAmount(Number(e[m.key]) || 0)} {m.unit}</b>
+                </span>
+              ))}
+            </div>
+          </details>
         </div>
       ))}
 
@@ -114,12 +131,48 @@ export default function Calories({ settings, saveSettings }) {
   )
 }
 
-function Bar({ value, max }) {
+function Bar({ value, max, goal = false }) {
   const pct = Math.min(100, max ? (value / max) * 100 : 0)
+  // Over a limit is a warning; over a goal is fine.
+  const cls = value > max ? (goal ? 'met' : 'over') : ''
   return (
     <div className="bar">
-      <div style={{ width: pct + '%' }} className={value > max ? 'over' : ''} />
+      <div style={{ width: pct + '%' }} className={cls} />
     </div>
+  )
+}
+
+function fmtAmount(v) {
+  if (v === 0) return '0'
+  if (v < 10) return v.toFixed(1).replace(/\.0$/, '')
+  return String(Math.round(v))
+}
+
+function Micros({ total }) {
+  return (
+    <details className="card">
+      <summary>Micronutrients</summary>
+      <div className="micros">
+        {MICROS.map((m) => {
+          const v = total[m.key] || 0
+          return (
+            <div className="micro" key={m.key}>
+              <div className="row small">
+                <span>{m.label}</span>
+                <span className="muted">
+                  {fmtAmount(v)} {m.unit} · {Math.round((v / m.dv) * 100)}%
+                </span>
+              </div>
+              <Bar value={v} max={m.dv} goal={m.kind === 'goal'} />
+            </div>
+          )
+        })}
+      </div>
+      <p className="muted small">
+        % of the FDA Daily Value. Sugar, sodium, saturated fat and cholesterol are limits; the rest are goals. AI
+        estimates for vitamins and minerals are rough.
+      </p>
+    </details>
   )
 }
 
@@ -154,16 +207,7 @@ function AddFood({ onSave }) {
       })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
-      setForm({
-        name: data.name ?? '',
-        calories: data.calories ?? '',
-        protein: data.protein ?? '',
-        carbs: data.carbs ?? '',
-        fat: data.fat ?? '',
-        fiber: data.fiber ?? '',
-        sugar: data.sugar ?? '',
-        sodium: data.sodium ?? '',
-      })
+      setForm(Object.fromEntries(['name', ...NUM].map((k) => [k, data[k] ?? ''])))
       setMsg(`Estimate (${data.confidence ?? '?'} confidence): ${data.notes ?? ''} Edit anything, then save.`)
     } catch (e) {
       setMsg('Estimate failed: ' + (e.message || e))
@@ -206,10 +250,18 @@ function AddFood({ onSave }) {
         <label>Protein g<input type="number" inputMode="decimal" step="any" value={form.protein} onChange={set('protein')} /></label>
         <label>Carbs g<input type="number" inputMode="decimal" step="any" value={form.carbs} onChange={set('carbs')} /></label>
         <label>Fat g<input type="number" inputMode="decimal" step="any" value={form.fat} onChange={set('fat')} /></label>
-        <label>Fiber g<input type="number" inputMode="decimal" step="any" value={form.fiber} onChange={set('fiber')} /></label>
-        <label>Sugar g<input type="number" inputMode="decimal" step="any" value={form.sugar} onChange={set('sugar')} /></label>
-        <label>Sodium mg<input type="number" inputMode="decimal" step="any" value={form.sodium} onChange={set('sodium')} /></label>
       </div>
+      <details>
+        <summary className="muted small">Micronutrients (optional)</summary>
+        <div className="grid3">
+          {MICROS.map((m) => (
+            <label key={m.key}>
+              {m.label} {m.unit}
+              <input type="number" inputMode="decimal" step="any" value={form[m.key]} onChange={set(m.key)} />
+            </label>
+          ))}
+        </div>
+      </details>
       <div className="row">
         <button className="primary">Save</button>
         <button type="button" className="link" onClick={() => setOpen(false)}>Cancel</button>
