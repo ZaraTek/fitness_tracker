@@ -75,3 +75,13 @@ details[open] summary { margin-bottom: 10px; }
 .gallery img, .gallery .ph { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 8px; background: var(--bg); display: block; }
 .gallery figcaption { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--muted); }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+
+.chat-log { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.bubble { max-width: 92%; padding: 8px 12px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+.bubble p { margin: 0; white-space: pre-wrap; }
+.bubble.user { align-self: flex-end; background: var(--line); }
+.bubble.assistant { align-self: flex-start; background: var(--bg); border: 1px solid var(--line); }
+.bubble img { max-width: 160px; border-radius: 8px; }
+.bubble .item { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.chat-input { display: flex; gap: 6px; }
+.chat-input .attach { padding: 10px 12px; background: var(--line); color: var(--text); font-weight: 400; }
