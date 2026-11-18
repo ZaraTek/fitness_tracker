@@ -54,7 +54,7 @@ export default function App({ user }) {
   return (
     <div className="app">
       <header>
-        <strong>🏋️ Fitness</strong>
+        <strong className="brand">Fitness</strong>
         <span className="muted small">{user.email}</span>
         <button className="link" onClick={() => supabase.auth.signOut()}>Sign out</button>
       </header>

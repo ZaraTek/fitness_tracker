@@ -144,7 +144,11 @@ export default function FoodChat({ onSave, onRemove, context }) {
             {m.status === 'undone' && <span className="muted small">Removed from log</span>}
           </div>
         ))}
-        {busy && <div className="bubble assistant muted">Thinking…</div>}
+        {busy && (
+          <div className="bubble assistant" aria-label="Thinking">
+            <span className="typing"><i /><i /><i /></span>
+          </div>
+        )}
         <div ref={endRef} />
       </div>
 
