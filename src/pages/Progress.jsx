@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase, explain } from '../supabase'
 import { toDateStr, prettyDate, parseDate } from '../dates'
+import { photoTakenDate } from '../exif'
 
 const BUCKET = 'progress-photos'
 
@@ -28,7 +29,7 @@ export default function Progress({ settings, user }) {
   const [error, setError] = useState('')
   const [date, setDate] = useState(toDateStr())
   const [weight, setWeight] = useState('')
-  const [photoDate, setPhotoDate] = useState(toDateStr())
+  const [staged, setStaged] = useState(null) // { file, url, date, detected }
   const [uploading, setUploading] = useState(false)
   const unit = settings.unit
 
@@ -70,18 +71,33 @@ export default function Progress({ settings, user }) {
     setWeighIns((w) => w.filter((x) => x.id !== id))
   }
 
-  async function upload(e) {
+  // Pick a photo: read its taken-on date, then let the user confirm before uploading.
+  async function pick(e) {
     const file = e.target.files[0]
     e.target.value = ''
     if (!file) return
+    const found = await photoTakenDate(file)
+    const date = found && found <= toDateStr() ? found : null
+    if (staged) URL.revokeObjectURL(staged.url)
+    setStaged({ file, url: URL.createObjectURL(file), date: date ?? toDateStr(), detected: Boolean(date) })
+  }
+
+  function cancelStaged() {
+    if (staged) URL.revokeObjectURL(staged.url)
+    setStaged(null)
+  }
+
+  async function upload() {
+    if (!staged) return
     setUploading(true)
     try {
-      const blob = await resizeToBlob(file)
+      const blob = await resizeToBlob(staged.file)
       const path = `${user.id}/${crypto.randomUUID()}.jpg`
       const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg' })
       if (up.error) throw up.error
-      const { error } = await supabase.from('progress_photos').insert({ date: photoDate, path })
+      const { error } = await supabase.from('progress_photos').insert({ date: staged.date, path })
       if (error) throw error
+      cancelStaged()
       await load()
     } catch (err) {
       setError(explain(err))
@@ -144,20 +160,39 @@ export default function Progress({ settings, user }) {
         <div className="row">
           <h3>Photos</h3>
           <label className="primary file-btn">
-            {uploading ? 'Uploading…' : '+ Add photo'}
-            <input type="file" accept="image/*" hidden disabled={uploading} onChange={upload} />
+            {staged ? 'Change photo' : '+ Add photo'}
+            <input type="file" accept="image/*" hidden disabled={uploading} onChange={pick} />
           </label>
         </div>
-        <label>
-          Photo date
-          <input
-            type="date"
-            value={photoDate}
-            max={toDateStr()}
-            onChange={(e) => setPhotoDate(e.target.value || toDateStr())}
-          />
-        </label>
-        <p className="muted small">Pick the date first, then add the photo. Private to your account.</p>
+        {staged ? (
+          <div className="staged">
+            <img src={staged.url} alt="Selected progress photo" />
+            <div className="staged-form">
+              <label>
+                Photo date
+                <input
+                  type="date"
+                  value={staged.date}
+                  max={toDateStr()}
+                  onChange={(e) => setStaged({ ...staged, date: e.target.value || toDateStr(), detected: false })}
+                />
+              </label>
+              <p className="muted small">
+                {staged.detected
+                  ? 'Date read from the photo. Change it if it’s wrong.'
+                  : 'No date found in the photo, so it’s set to today. Change it if needed.'}
+              </p>
+              <div className="row">
+                <button className="primary" onClick={upload} disabled={uploading}>
+                  {uploading ? 'Uploading…' : 'Upload'}
+                </button>
+                <button className="link" onClick={cancelStaged} disabled={uploading}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="muted small">The date is read from the photo when it has one. Private to your account.</p>
+        )}
         <div className="gallery">
           {photos.map((p) => (
             <figure key={p.id}>
