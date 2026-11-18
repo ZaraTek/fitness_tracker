@@ -114,6 +114,7 @@ export default function Calories({ settings, saveSettings }) {
 
   return (
     <>
+      <Goals settings={settings} saveSettings={saveSettings} />
       <div className="row datenav">
         <button className="link" onClick={() => setDate(addDays(date, -1))}>◀</button>
         <strong>{date === toDateStr() ? 'Today' : prettyDate(date)}</strong>
@@ -155,7 +156,6 @@ export default function Calories({ settings, saveSettings }) {
         <EntryCard key={e.id} entry={e} onUpdate={(form) => update(e.id, form)} onRemove={() => remove(e.id)} />
       ))}
 
-      <Goals settings={settings} saveSettings={saveSettings} />
     </>
   )
 }
