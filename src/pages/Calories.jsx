@@ -37,15 +37,24 @@ export default function Calories({ settings, saveSettings }) {
   async function save(form) {
     const row = { date, name: form.name || 'Food' }
     for (const k of NUM) row[k] = Number(form[k]) || 0
+    row.calories = Math.round(row.calories) // integer column
     const { data, error } = await supabase.from('food_entries').insert(row).select().single()
-    if (error) return setError(explain(error))
+    if (error) {
+      setError(explain(error))
+      return null
+    }
     setEntries((e) => [...e, data])
+    return data
   }
 
   async function remove(id) {
     const { error } = await supabase.from('food_entries').delete().eq('id', id)
-    if (error) return setError(explain(error))
+    if (error) {
+      setError(explain(error))
+      return false
+    }
     setEntries((e) => e.filter((x) => x.id !== id))
+    return true
   }
 
   const balance = Math.round(total.calories - settings.maintenance_calories)
@@ -83,6 +92,7 @@ export default function Calories({ settings, saveSettings }) {
 
       <FoodChat
         onSave={save}
+        onRemove={remove}
         context={`${Math.round(total.calories)} of ${settings.calorie_target} kcal eaten; protein ${Math.round(total.protein)}/${settings.protein_target} g, carbs ${Math.round(total.carbs)}/${settings.carb_target} g, fat ${Math.round(total.fat)}/${settings.fat_target} g.`}
       />
       <AddFood onSave={save} />

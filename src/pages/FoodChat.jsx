@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { resizeToBase64 } from '../image'
 
-// Chat with Claude to log food: describe a meal, attach a photo, refine it,
-// then add the suggested items to today's log.
-export default function FoodChat({ onSave, context }) {
+const fmt = (it) =>
+  `${Math.round(it.calories)} kcal · P ${Math.round(it.protein)} · C ${Math.round(it.carbs)} · F ${Math.round(it.fat)}`
+
+// Chat with Claude to log food: describe a meal or attach a photo and the
+// estimate goes straight into the log. Corrections replace the last logged items.
+export default function FoodChat({ onSave, onRemove, context }) {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState([]) // {role, text, image?, items?, added?:Set}
+  // {role, text, image?, items?, loggedIds?: string[], status?: 'logged'|'replaced'|'undone'}
+  const [messages, setMessages] = useState([])
   const [text, setText] = useState('')
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -17,15 +21,21 @@ export default function FoodChat({ onSave, context }) {
     endRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [messages, busy])
 
+  async function removeIds(ids) {
+    for (const id of ids) await onRemove(id)
+  }
+
   async function send(e) {
     e.preventDefault()
     if ((!text.trim() && !file) || busy) return
     setBusy(true)
     setError('')
+    const userText = text.trim()
+    const userFile = file
     try {
-      const image = file ? await resizeToBase64(file, 1024) : undefined
-      const userMsg = { role: 'user', text: text.trim(), image }
-      const history = [...messages, userMsg]
+      const image = userFile ? await resizeToBase64(userFile, 1024) : undefined
+      const userMsg = { role: 'user', text: userText, image }
+      let history = [...messages, userMsg]
       setMessages(history)
       setText('')
       setFile(null)
@@ -35,33 +45,60 @@ export default function FoodChat({ onSave, context }) {
           context,
           messages: history.map((m) => ({
             role: m.role,
-            text: m.text,
+            // Tell the model what actually got logged so corrections make sense.
+            text:
+              m.role === 'assistant' && m.items?.length
+                ? `${m.text}\n[${m.status === 'undone' ? 'Undone by user' : 'Logged'}: ${m.items
+                    .map((it) => `${it.name} (${fmt(it)})`)
+                    .join('; ')}]`
+                : m.text,
             image: m.image,
             mediaType: m.image ? 'image/jpeg' : undefined,
           })),
         },
       })
-      if (error) throw error
+      if (error) throw new Error(await errorText(error))
       if (data?.error) throw new Error(data.error)
-      setMessages([...history, { role: 'assistant', text: data.reply, items: data.items ?? [], added: [] }])
+      if (!data?.reply && !data?.items?.length) throw new Error('Empty response, please try again.')
+
+      const items = data.items ?? []
+      let loggedIds = []
+      if (items.length) {
+        if (data.action === 'replace') {
+          const prevIdx = history.findLastIndex((m) => m.status === 'logged')
+          if (prevIdx >= 0) {
+            await removeIds(history[prevIdx].loggedIds)
+            history = history.map((m, i) => (i === prevIdx ? { ...m, status: 'replaced' } : m))
+          }
+        }
+        for (const it of items) {
+          const row = await onSave(it)
+          if (row) loggedIds.push(row.id)
+        }
+      }
+      setMessages([
+        ...history,
+        {
+          role: 'assistant',
+          text: data.reply,
+          items,
+          loggedIds,
+          status: loggedIds.length ? 'logged' : undefined,
+        },
+      ])
     } catch (err) {
       setError('Chat failed: ' + (err.message || err))
+      // Put the message back so it can be retried.
+      setMessages((m) => (m[m.length - 1]?.role === 'user' ? m.slice(0, -1) : m))
+      setText(userText)
+      setFile(userFile)
     }
     setBusy(false)
   }
 
-  async function add(msgIndex, itemIndex) {
-    const m = messages[msgIndex]
-    if (m.added.includes(itemIndex)) return
-    await onSave(m.items[itemIndex])
-    setMessages((all) =>
-      all.map((x, i) => (i === msgIndex ? { ...x, added: [...x.added, itemIndex] } : x)),
-    )
-  }
-
-  async function addAll(msgIndex) {
-    const m = messages[msgIndex]
-    for (let i = 0; i < m.items.length; i++) if (!m.added.includes(i)) await add(msgIndex, i)
+  async function undo(i) {
+    await removeIds(messages[i].loggedIds)
+    setMessages((all) => all.map((m, j) => (j === i ? { ...m, status: 'undone' } : m)))
   }
 
   if (!open) return <button className="wide" onClick={() => setOpen(true)}>💬 Chat to log food</button>
@@ -81,8 +118,8 @@ export default function FoodChat({ onSave, context }) {
       <div className="chat-log">
         {!messages.length && (
           <p className="muted small">
-            Describe what you ate (“2 eggs, toast with butter, black coffee”) or attach a photo. Correct me
-            if I’m off (“that was a small bowl”), then add the result to your log.
+            Tell me what you ate (“2 eggs, toast with butter, black coffee”) or attach a photo and I’ll log it.
+            Correct me if I’m off (“that was a small bowl”) and I’ll update the entry.
           </p>
         )}
         {messages.map((m, i) => (
@@ -90,22 +127,21 @@ export default function FoodChat({ onSave, context }) {
             {m.image && <img src={`data:image/jpeg;base64,${m.image}`} alt="Attached food" />}
             {m.text && <p>{m.text}</p>}
             {m.items?.map((it, j) => (
-              <div className="item" key={j}>
+              <div className={'item' + (m.status === 'logged' ? '' : ' struck')} key={j}>
                 <div>
                   <b>{it.name}</b>
-                  <div className="muted small">
-                    {Math.round(it.calories)} kcal · P {Math.round(it.protein)} · C {Math.round(it.carbs)} · F{' '}
-                    {Math.round(it.fat)}
-                  </div>
+                  <div className="muted small">{fmt(it)}</div>
                 </div>
-                <button className="primary" disabled={m.added.includes(j)} onClick={() => add(i, j)}>
-                  {m.added.includes(j) ? '✓' : 'Add'}
-                </button>
               </div>
             ))}
-            {m.items?.length > 1 && m.added.length < m.items.length && (
-              <button className="link" onClick={() => addAll(i)}>Add all</button>
+            {m.status === 'logged' && (
+              <div className="row small">
+                <span className="good">✓ Logged</span>
+                <button className="link" onClick={() => undo(i)}>Undo</button>
+              </div>
             )}
+            {m.status === 'replaced' && <span className="muted small">Replaced by the correction below</span>}
+            {m.status === 'undone' && <span className="muted small">Removed from log</span>}
           </div>
         ))}
         {busy && <div className="bubble assistant muted">Thinking…</div>}
@@ -128,4 +164,15 @@ export default function FoodChat({ onSave, context }) {
       </form>
     </div>
   )
+}
+
+// supabase-js hides the function's JSON error behind a generic message.
+async function errorText(error) {
+  try {
+    const body = await error.context?.json()
+    if (body?.error) return body.error
+  } catch {
+    // not JSON
+  }
+  return error.message
 }

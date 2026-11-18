@@ -11,8 +11,10 @@ const CORS = {
 const SYSTEM = `You are a friendly nutrition assistant inside a calorie tracker. The user describes what they ate and/or sends photos of food. Estimate nutrition for the portions described or shown.
 - Always answer by calling the respond tool.
 - "reply": short, conversational (1-3 sentences). Mention key portion assumptions.
-- "items": one entry per distinct food or meal to log, with nutrition for the whole portion. Use an empty array if you need to ask a clarifying question first, or if the user is just chatting.
-- If the user corrects a portion or ingredient, return the corrected items in full (they replace your earlier suggestion).
+- "items": one entry per distinct food or meal, with nutrition for the whole portion. Items are added to the user's food log automatically.
+- "action": "log" when the user tells you about food they ate (add the items); "replace" when they correct food you already logged in this chat (your items fully replace the last logged set); "none" when you only ask a clarifying question or chat (items must be empty).
+- Prefer logging with reasonable assumptions over asking questions. Ask only if you genuinely cannot estimate.
+- If the user gives their own numbers (calories, protein, etc.), use them exactly and estimate only the missing values.
 - Units: calories kcal; protein/carbs/fat/fiber/sugar grams; sodium mg. Use numbers, never ranges.
 - Do not give medical advice. You may comment briefly on how the meal fits their remaining calories when context is provided.`
 
@@ -23,6 +25,7 @@ const TOOL = {
     type: 'object',
     properties: {
       reply: { type: 'string' },
+      action: { type: 'string', enum: ['log', 'replace', 'none'] },
       items: {
         type: 'array',
         items: {
@@ -41,7 +44,7 @@ const TOOL = {
         },
       },
     },
-    required: ['reply', 'items'],
+    required: ['reply', 'action', 'items'],
   },
 }
 
@@ -88,7 +91,7 @@ Deno.serve(async (req) => {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-5-5',
-        max_tokens: 1000,
+        max_tokens: 8000,
         system: SYSTEM + (context ? `\n\nUser's day so far: ${context}` : ''),
         tools: [TOOL],
         messages: apiMessages,
@@ -97,12 +100,25 @@ Deno.serve(async (req) => {
     const data = await res.json()
     if (!res.ok) return json({ error: data?.error?.message ?? 'Anthropic API error' }, 502)
 
+    // A cut-off response has a truncated tool input, so never treat it as a real answer.
+    if (data.stop_reason === 'max_tokens') {
+      return json({ error: 'The response was too long and got cut off. Try again or split the meal up.' }, 502)
+    }
+
     // This model doesn't allow forcing a tool, so fall back to plain text if it skipped the tool.
     const block = data.content?.find((c: { type: string }) => c.type === 'tool_use')
-    if (block) return json({ reply: block.input.reply ?? '', items: block.input.items ?? [] })
-    const text = data.content?.find((c: { type: string }) => c.type === 'text')?.text
+    const text = data.content
+      ?.filter((c: { type: string }) => c.type === 'text')
+      .map((c: { text: string }) => c.text)
+      .join('\n')
+      .trim()
+    if (block) {
+      const items = Array.isArray(block.input.items) ? block.input.items : []
+      const action = items.length ? (block.input.action === 'replace' ? 'replace' : 'log') : 'none'
+      return json({ reply: block.input.reply || text || '', action, items })
+    }
     if (!text) return json({ error: 'No response from model' }, 502)
-    return json({ reply: text, items: [] })
+    return json({ reply: text, action: 'none', items: [] })
   } catch (e) {
     return json({ error: String(e) }, 500)
   }

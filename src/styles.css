@@ -89,3 +89,4 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 .plain { color: var(--text); font-weight: 500; }
 .editor { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
 .editor-row { display: grid; grid-template-columns: 20px 1fr 1fr 32px; gap: 8px; align-items: center; }
+.bubble .item.struck b, .bubble .item.struck .small { text-decoration: line-through; opacity: 0.6; }
