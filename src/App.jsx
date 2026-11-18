@@ -14,13 +14,13 @@ const DEFAULTS = {
 }
 
 const TABS = [
-  ['workouts', '🏋️', 'Workouts'],
   ['calories', '🍽️', 'Calories'],
+  ['workouts', '🏋️', 'Workouts'],
   ['progress', '📈', 'Progress'],
 ]
 
 export default function App({ user }) {
-  const [tab, setTab] = useState(() => localStorage.getItem('tab') || 'workouts')
+  const [tab, setTab] = useState(() => localStorage.getItem('tab') || 'calories')
   const [settings, setSettings] = useState(DEFAULTS)
   const [error, setError] = useState('')
 
