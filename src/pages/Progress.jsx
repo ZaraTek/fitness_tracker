@@ -28,6 +28,7 @@ export default function Progress({ settings, user }) {
   const [error, setError] = useState('')
   const [date, setDate] = useState(toDateStr())
   const [weight, setWeight] = useState('')
+  const [photoDate, setPhotoDate] = useState(toDateStr())
   const [uploading, setUploading] = useState(false)
   const unit = settings.unit
 
@@ -79,7 +80,7 @@ export default function Progress({ settings, user }) {
       const path = `${user.id}/${crypto.randomUUID()}.jpg`
       const up = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg' })
       if (up.error) throw up.error
-      const { error } = await supabase.from('progress_photos').insert({ date, path })
+      const { error } = await supabase.from('progress_photos').insert({ date: photoDate, path })
       if (error) throw error
       await load()
     } catch (err) {
@@ -147,7 +148,16 @@ export default function Progress({ settings, user }) {
             <input type="file" accept="image/*" hidden disabled={uploading} onChange={upload} />
           </label>
         </div>
-        <p className="muted small">Dated {prettyDate(date)} (uses the date above). Private to your account.</p>
+        <label>
+          Photo date
+          <input
+            type="date"
+            value={photoDate}
+            max={toDateStr()}
+            onChange={(e) => setPhotoDate(e.target.value || toDateStr())}
+          />
+        </label>
+        <p className="muted small">Pick the date first, then add the photo. Private to your account.</p>
         <div className="gallery">
           {photos.map((p) => (
             <figure key={p.id}>
