@@ -85,3 +85,7 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
 .bubble .item { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
 .chat-input { display: flex; gap: 6px; }
 .chat-input .attach { padding: 10px 12px; background: var(--line); color: var(--text); font-weight: 400; }
+
+.plain { color: var(--text); font-weight: 500; }
+.editor { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.editor-row { display: grid; grid-template-columns: 20px 1fr 1fr 32px; gap: 8px; align-items: center; }

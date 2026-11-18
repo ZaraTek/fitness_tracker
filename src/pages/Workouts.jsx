@@ -4,14 +4,25 @@ import { toDateStr, prettyDate } from '../dates'
 
 const CATS = ['push', 'pull', 'legs']
 
+// "3×4 @ 120" — group consecutive identical sets.
+function fmtSets(list, unit) {
+  const groups = []
+  for (const s of list) {
+    const last = groups[groups.length - 1]
+    if (last && last.weight === Number(s.weight) && last.reps === s.reps) last.count++
+    else groups.push({ weight: Number(s.weight), reps: s.reps, count: 1 })
+  }
+  return groups.map((g) => `${g.count}×${g.reps} @ ${g.weight}${unit === 'kg' ? 'kg' : ''}`).join(', ')
+}
+
 export default function Workouts({ settings }) {
   const [cat, setCat] = useState('push')
-  const [date, setDate] = useState(toDateStr())
   const [exercises, setExercises] = useState([])
   const [workouts, setWorkouts] = useState([])
   const [sets, setSets] = useState([])
   const [error, setError] = useState('')
-  const [view, setView] = useState('log') // log | catalog
+  const [editing, setEditing] = useState(null) // { exercise, date }
+  const unit = settings.unit
 
   const load = useCallback(async () => {
     const [ex, wk, st] = await Promise.all([
@@ -31,58 +42,25 @@ export default function Workouts({ settings }) {
     load()
   }, [load])
 
-  const workout = workouts.find((w) => w.date === date && w.category === cat)
-  const catExercises = exercises.filter((e) => e.category === cat)
-
-  // Best weight + last performance per exercise, from all history.
-  const stats = useMemo(() => {
+  // Per exercise: sessions (date -> sets), newest first.
+  const history = useMemo(() => {
     const wDate = Object.fromEntries(workouts.map((w) => [w.id, w.date]))
     const out = {}
     for (const s of sets) {
       const d = wDate[s.workout_id]
-      const o = (out[s.exercise_id] ??= { best: 0, lastDate: '', lastSets: [] })
-      o.best = Math.max(o.best, Number(s.weight))
-      if (d > o.lastDate) {
-        o.lastDate = d
-        o.lastSets = []
-      }
-      if (d === o.lastDate) o.lastSets.push(s)
+      if (!d) continue
+      const byDate = (out[s.exercise_id] ??= {})
+      ;(byDate[d] ??= []).push(s)
     }
-    return out
+    return Object.fromEntries(
+      Object.entries(out).map(([id, byDate]) => [
+        id,
+        Object.entries(byDate)
+          .sort(([a], [b]) => (a < b ? 1 : -1))
+          .map(([date, list]) => ({ date, sets: list.sort((a, b) => a.set_number - b.set_number) })),
+      ]),
+    )
   }, [sets, workouts])
-
-  async function ensureWorkout() {
-    if (workout) return workout.id
-    const { data, error } = await supabase.from('workouts').insert({ date, category: cat }).select().single()
-    if (error) throw error
-    setWorkouts((w) => [data, ...w])
-    return data.id
-  }
-
-  async function addSets({ exercise_id, weight, reps, count }) {
-    try {
-      const workout_id = await ensureWorkout()
-      const existing = sets.filter((s) => s.workout_id === workout_id && s.exercise_id === exercise_id).length
-      const rows = Array.from({ length: count }, (_, i) => ({
-        workout_id,
-        exercise_id,
-        set_number: existing + i + 1,
-        reps,
-        weight,
-      }))
-      const { data, error } = await supabase.from('workout_sets').insert(rows).select()
-      if (error) throw error
-      setSets((s) => [...s, ...data])
-    } catch (e) {
-      setError(explain(e))
-    }
-  }
-
-  async function removeSet(id) {
-    const { error } = await supabase.from('workout_sets').delete().eq('id', id)
-    if (error) return setError(explain(error))
-    setSets((s) => s.filter((x) => x.id !== id))
-  }
 
   async function addExercise(name) {
     const { data, error } = await supabase.from('exercises').insert({ name, category: cat }).select().single()
@@ -94,155 +72,170 @@ export default function Workouts({ settings }) {
     if (!confirm(`Delete "${ex.name}" and all its logged sets?`)) return
     const { error } = await supabase.from('exercises').delete().eq('id', ex.id)
     if (error) return setError(explain(error))
-    setExercises((e) => e.filter((x) => x.id !== ex.id))
-    setSets((s) => s.filter((x) => x.exercise_id !== ex.id))
+    setEditing(null)
+    await load()
   }
 
-  async function removeWorkout() {
-    if (!confirm('Delete this whole session?')) return
-    const { error } = await supabase.from('workouts').delete().eq('id', workout.id)
-    if (error) return setError(explain(error))
-    setWorkouts((w) => w.filter((x) => x.id !== workout.id))
-    setSets((s) => s.filter((x) => x.workout_id !== workout.id))
+  // Replace this exercise's sets for the given date with `rows`.
+  async function saveStats(exercise, date, rows) {
+    try {
+      let workout = workouts.find((w) => w.date === date && w.category === exercise.category)
+      if (!workout) {
+        if (!rows.length) return setEditing(null)
+        const { data, error } = await supabase
+          .from('workouts')
+          .insert({ date, category: exercise.category })
+          .select()
+          .single()
+        if (error) throw error
+        workout = data
+      }
+      const del = await supabase
+        .from('workout_sets')
+        .delete()
+        .eq('workout_id', workout.id)
+        .eq('exercise_id', exercise.id)
+      if (del.error) throw del.error
+      if (rows.length) {
+        const ins = await supabase.from('workout_sets').insert(
+          rows.map((r, i) => ({
+            workout_id: workout.id,
+            exercise_id: exercise.id,
+            set_number: i + 1,
+            reps: Number(r.reps),
+            weight: Number(r.weight) || 0,
+          })),
+        )
+        if (ins.error) throw ins.error
+      }
+      setEditing(null)
+      await load()
+    } catch (e) {
+      setError(explain(e))
+    }
   }
 
-  const sessionSets = workout ? sets.filter((s) => s.workout_id === workout.id) : []
-  const unit = settings.unit
+  const list = exercises.filter((e) => e.category === cat)
 
   return (
     <>
       <div className="seg">
         {CATS.map((c) => (
-          <button key={c} className={cat === c ? 'active' : ''} onClick={() => setCat(c)}>
+          <button key={c} className={cat === c ? 'active' : ''} onClick={() => { setCat(c); setEditing(null) }}>
             {c}
           </button>
         ))}
       </div>
-      <div className="seg small-seg">
-        <button className={view === 'log' ? 'active' : ''} onClick={() => setView('log')}>Log</button>
-        <button className={view === 'catalog' ? 'active' : ''} onClick={() => setView('catalog')}>Catalog</button>
-      </div>
       {error && <div className="error">{error}</div>}
 
-      {view === 'log' && (
-        <>
-          <div className="card">
+      <NewExercise cat={cat} onAdd={addExercise} />
+
+      {list.map((ex) => {
+        const sessions = history[ex.id] ?? []
+        const latest = sessions[0]
+        const best = Math.max(0, ...sessions.flatMap((s) => s.sets.map((x) => Number(x.weight))))
+        const isEditing = editing?.exercise.id === ex.id
+        return (
+          <div className="card" key={ex.id}>
             <div className="row">
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value || toDateStr())} />
-              {workout && (
-                <button className="link danger" onClick={removeWorkout}>Delete session</button>
+              <h3>{ex.name}</h3>
+              {!isEditing && (
+                <button onClick={() => setEditing({ exercise: ex, date: toDateStr() })}>Edit stats</button>
               )}
             </div>
-            <AddSetForm exercises={catExercises} stats={stats} unit={unit} onAdd={addSets} />
+
+            {latest ? (
+              <p className="muted small">
+                {prettyDate(latest.date)}: <b className="plain">{fmtSets(latest.sets, unit)}</b> · Best {best} {unit}
+              </p>
+            ) : (
+              <p className="muted small">No stats yet.</p>
+            )}
+
+            {isEditing && (
+              <StatsEditor
+                exercise={ex}
+                initialDate={editing.date}
+                sessions={sessions}
+                unit={unit}
+                onSave={(date, rows) => saveStats(ex, date, rows)}
+                onCancel={() => setEditing(null)}
+                onDelete={() => removeExercise(ex)}
+              />
+            )}
+
+            {!isEditing && sessions.length > 1 && (
+              <details>
+                <summary className="muted small">History ({sessions.length})</summary>
+                {sessions.map((s) => (
+                  <div className="row set-row" key={s.date}>
+                    <span className="small">{prettyDate(s.date)}</span>
+                    <span className="small">{fmtSets(s.sets, unit)}</span>
+                    <button className="link" onClick={() => setEditing({ exercise: ex, date: s.date })}>Edit</button>
+                  </div>
+                ))}
+              </details>
+            )}
           </div>
-
-          {catExercises
-            .filter((e) => sessionSets.some((s) => s.exercise_id === e.id))
-            .map((e) => (
-              <div className="card" key={e.id}>
-                <h3>{e.name}</h3>
-                {sessionSets
-                  .filter((s) => s.exercise_id === e.id)
-                  .map((s) => (
-                    <div className="row set-row" key={s.id}>
-                      <span>Set {s.set_number}</span>
-                      <span>
-                        {Number(s.weight)} {unit} × {s.reps}
-                      </span>
-                      <button className="link danger" onClick={() => removeSet(s.id)}>✕</button>
-                    </div>
-                  ))}
-              </div>
-            ))}
-          {!sessionSets.length && <p className="muted center">No sets logged for {prettyDate(date)} ({cat}).</p>}
-        </>
-      )}
-
-      {view === 'catalog' && (
-        <>
-          <NewExercise cat={cat} onAdd={addExercise} />
-          {catExercises.map((e) => {
-            const st = stats[e.id]
-            return (
-              <div className="card" key={e.id}>
-                <div className="row">
-                  <h3>{e.name}</h3>
-                  <button className="link danger" onClick={() => removeExercise(e)}>Delete</button>
-                </div>
-                {st ? (
-                  <p className="muted small">
-                    Best: <b>{st.best} {unit}</b> · Last ({prettyDate(st.lastDate)}):{' '}
-                    {st.lastSets.map((s) => `${Number(s.weight)}×${s.reps}`).join(', ')}
-                  </p>
-                ) : (
-                  <p className="muted small">Not logged yet.</p>
-                )}
-              </div>
-            )
-          })}
-          {!catExercises.length && <p className="muted center">No {cat} exercises yet. Add one above.</p>}
-        </>
-      )}
+        )
+      })}
+      {!list.length && <p className="muted center">No {cat} exercises yet. Add one above.</p>}
     </>
   )
 }
 
-function AddSetForm({ exercises, stats, unit, onAdd }) {
-  const [exId, setExId] = useState('')
-  const [weight, setWeight] = useState('')
-  const [reps, setReps] = useState('')
-  const [count, setCount] = useState(1)
+function StatsEditor({ sessions, unit, initialDate, onSave, onCancel, onDelete }) {
+  const [date, setDate] = useState(initialDate)
+  const [rows, setRows] = useState([])
+  const [busy, setBusy] = useState(false)
 
-  const selected = exercises.find((e) => e.id === exId) ? exId : exercises[0]?.id || ''
-  const st = stats[selected]
-
-  // Prefill from the last performance whenever the exercise changes.
+  // Load the sets already logged on this date; otherwise start from the last session.
   useEffect(() => {
-    const last = stats[selected]?.lastSets?.[0]
-    if (last) {
-      setWeight(String(Number(last.weight)))
-      setReps(String(last.reps))
-    } else {
-      setWeight('')
-      setReps('')
-    }
+    const onDate = sessions.find((s) => s.date === date)
+    const source = onDate ?? sessions[0]
+    setRows(
+      source
+        ? source.sets.map((s) => ({ weight: String(Number(s.weight)), reps: String(s.reps) }))
+        : [{ weight: '', reps: '' }],
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected])
+  }, [date])
 
-  if (!exercises.length) return <p className="muted">Add exercises in the Catalog tab first.</p>
+  const existing = sessions.some((s) => s.date === date)
+  const setRow = (i, k) => (e) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: e.target.value } : r)))
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
-    onAdd({ exercise_id: selected, weight: Number(weight) || 0, reps: Number(reps), count: Number(count) || 1 })
+    setBusy(true)
+    await onSave(date, rows.filter((r) => r.reps !== ''))
+    setBusy(false)
   }
 
   return (
-    <form onSubmit={submit}>
-      <select value={selected} onChange={(e) => setExId(e.target.value)}>
-        {exercises.map((e) => (
-          <option key={e.id} value={e.id}>{e.name}</option>
-        ))}
-      </select>
-      {st && (
-        <p className="muted small">
-          Last ({prettyDate(st.lastDate)}): {st.lastSets.map((s) => `${Number(s.weight)}×${s.reps}`).join(', ')} · Best {st.best} {unit}
-        </p>
-      )}
-      <div className="grid3">
-        <label>
-          Weight ({unit})
-          <input type="number" inputMode="decimal" step="any" value={weight} onChange={(e) => setWeight(e.target.value)} />
-        </label>
-        <label>
-          Reps
-          <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} required />
-        </label>
-        <label>
-          Sets
-          <input type="number" inputMode="numeric" min="1" value={count} onChange={(e) => setCount(e.target.value)} />
-        </label>
+    <form onSubmit={submit} className="editor">
+      <label>
+        Date
+        <input type="date" value={date} max={toDateStr()} onChange={(e) => setDate(e.target.value || toDateStr())} />
+      </label>
+      <p className="muted small">
+        {existing ? 'Editing sets logged on this date.' : 'New entry, prefilled from your last session.'}
+      </p>
+      {rows.map((r, i) => (
+        <div className="editor-row" key={i}>
+          <span className="muted small">{i + 1}</span>
+          <input type="number" inputMode="decimal" step="any" placeholder={unit} value={r.weight} onChange={setRow(i, 'weight')} />
+          <input type="number" inputMode="numeric" placeholder="reps" value={r.reps} onChange={setRow(i, 'reps')} />
+          <button type="button" className="link danger" onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      <div className="row">
+        <button type="button" onClick={() => setRows([...rows, rows[rows.length - 1] ? { ...rows[rows.length - 1] } : { weight: '', reps: '' }])}>
+          + Set
+        </button>
+        <button className="primary" disabled={busy}>Save</button>
+        <button type="button" className="link" onClick={onCancel}>Cancel</button>
       </div>
-      <button className="primary">Add</button>
+      <button type="button" className="link danger" onClick={onDelete}>Delete exercise</button>
     </form>
   )
 }

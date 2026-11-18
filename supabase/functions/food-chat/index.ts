@@ -91,16 +91,18 @@ Deno.serve(async (req) => {
         max_tokens: 1000,
         system: SYSTEM + (context ? `\n\nUser's day so far: ${context}` : ''),
         tools: [TOOL],
-        tool_choice: { type: 'tool', name: 'respond' },
         messages: apiMessages,
       }),
     })
     const data = await res.json()
     if (!res.ok) return json({ error: data?.error?.message ?? 'Anthropic API error' }, 502)
 
+    // This model doesn't allow forcing a tool, so fall back to plain text if it skipped the tool.
     const block = data.content?.find((c: { type: string }) => c.type === 'tool_use')
-    if (!block) return json({ error: 'No response from model' }, 502)
-    return json({ reply: block.input.reply ?? '', items: block.input.items ?? [] })
+    if (block) return json({ reply: block.input.reply ?? '', items: block.input.items ?? [] })
+    const text = data.content?.find((c: { type: string }) => c.type === 'text')?.text
+    if (!text) return json({ error: 'No response from model' }, 502)
+    return json({ reply: text, items: [] })
   } catch (e) {
     return json({ error: String(e) }, 500)
   }
