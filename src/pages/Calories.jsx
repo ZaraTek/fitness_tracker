@@ -13,6 +13,7 @@ const MIGRATION_HINT = 'Micronutrients weren’t saved: run supabase/002_micros.
 export default function Calories({ settings, saveSettings }) {
   const [date, setDate] = useState(toDateStr())
   const [entries, setEntries] = useState([])
+  const [active, setActive] = useState(null) // active calories logged for this date, or null
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -29,6 +30,32 @@ export default function Calories({ settings, saveSettings }) {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    setActive(null)
+    supabase
+      .from('daily_activity')
+      .select('active_calories')
+      .eq('date', date)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) setError(explain(error))
+        else setActive(data ? data.active_calories : null)
+      })
+  }, [date])
+
+  async function saveActive(value) {
+    const { error } =
+      value === null
+        ? await supabase.from('daily_activity').delete().eq('date', date)
+        : await supabase.from('daily_activity').upsert({ date, active_calories: value }, { onConflict: 'user_id,date' })
+    if (error) {
+      setError(explain(error))
+      return false
+    }
+    setActive(value)
+    return true
+  }
 
   const total = useMemo(() => {
     const t = Object.fromEntries(NUM.map((k) => [k, 0]))
@@ -78,7 +105,11 @@ export default function Calories({ settings, saveSettings }) {
     return true
   }
 
-  const balance = Math.round(total.calories - settings.maintenance_calories)
+  // With a resting burn set and active calories logged, the day's maintenance is resting + active.
+  const resting = Number(settings.resting_calories) || 0
+  const fromActivity = resting > 0 && active !== null
+  const maintenance = fromActivity ? resting + active : settings.maintenance_calories
+  const balance = Math.round(total.calories - maintenance)
   const remaining = Math.round(settings.calorie_target - total.calories)
 
   return (
@@ -101,8 +132,11 @@ export default function Calories({ settings, saveSettings }) {
           <b className={balance <= 0 ? 'good' : 'warn'}>
             {balance <= 0 ? `${-balance} deficit` : `${balance} surplus`}
           </b>{' '}
-          <span className="muted">vs {settings.maintenance_calories} maintenance</span>
+          <span className="muted">
+            vs {maintenance} maintenance{fromActivity && ` (${resting} resting + ${active} active)`}
+          </span>
         </p>
+        <ActiveCalories value={active} onSave={saveActive} hasResting={resting > 0} />
         <MacroRow label="Protein" v={total.protein} t={settings.protein_target} />
         <MacroRow label="Carbs" v={total.carbs} t={settings.carb_target} />
         <MacroRow label="Fat" v={total.fat} t={settings.fat_target} />
@@ -123,6 +157,54 @@ export default function Calories({ settings, saveSettings }) {
 
       <Goals settings={settings} saveSettings={saveSettings} />
     </>
+  )
+}
+
+function ActiveCalories({ value, onSave, hasResting }) {
+  const [draft, setDraft] = useState(null) // non-null while editing
+  const [busy, setBusy] = useState(false)
+
+  async function submit(ev) {
+    ev.preventDefault()
+    const v = draft.trim() === '' ? null : Math.round(Number(draft))
+    if (v !== null && !(v >= 0)) return
+    setBusy(true)
+    if (await onSave(v)) setDraft(null)
+    setBusy(false)
+  }
+
+  if (draft !== null) {
+    return (
+      <form className="active-form" onSubmit={submit}>
+        <input
+          type="number"
+          inputMode="numeric"
+          min="0"
+          placeholder="Active kcal"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+        />
+        <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="link" onClick={() => setDraft(null)} disabled={busy}>Cancel</button>
+      </form>
+    )
+  }
+
+  return (
+    <div className="active-row small">
+      {value === null ? (
+        <button className="link" onClick={() => setDraft('')}>🔥 Add active calories</button>
+      ) : (
+        <>
+          <span>🔥 {value} active kcal</span>
+          <button className="link" onClick={() => setDraft(String(value))}>Edit</button>
+        </>
+      )}
+      {value !== null && !hasResting && (
+        <span className="muted">Set your resting burn in Goals to use this.</span>
+      )}
+    </div>
   )
 }
 
@@ -340,7 +422,7 @@ function Goals({ settings, saveSettings }) {
   const field = (k, label) => (
     <label>
       {label}
-      <input type="number" inputMode="numeric" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
+      <input type="number" inputMode="numeric" value={f[k] ?? ''} onChange={(e) => setF({ ...f, [k]: e.target.value })} />
     </label>
   )
   return (
@@ -349,6 +431,7 @@ function Goals({ settings, saveSettings }) {
       <div className="grid3">
         {field('calorie_target', 'Target kcal')}
         {field('maintenance_calories', 'Maintenance kcal')}
+        {field('resting_calories', 'Resting burn kcal')}
         {field('protein_target', 'Protein g')}
         {field('carb_target', 'Carbs g')}
         {field('fat_target', 'Fat g')}
@@ -367,6 +450,7 @@ function Goals({ settings, saveSettings }) {
             unit: f.unit,
             calorie_target: Number(f.calorie_target) || 0,
             maintenance_calories: Number(f.maintenance_calories) || 0,
+            resting_calories: Number(f.resting_calories) || null,
             protein_target: Number(f.protein_target) || 0,
             carb_target: Number(f.carb_target) || 0,
             fat_target: Number(f.fat_target) || 0,
@@ -375,7 +459,10 @@ function Goals({ settings, saveSettings }) {
       >
         Save goals
       </button>
-      <p className="muted small">Deficit/surplus = calories eaten − maintenance (what you burn per day).</p>
+      <p className="muted small">
+        Deficit/surplus = calories eaten − maintenance. On days you add active calories (e.g. Apple Watch Active
+        Energy), maintenance = resting burn + active calories; otherwise the maintenance above is used.
+      </p>
     </details>
   )
 }

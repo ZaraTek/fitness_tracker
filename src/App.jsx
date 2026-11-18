@@ -8,6 +8,7 @@ const DEFAULTS = {
   unit: 'lb',
   calorie_target: 2200,
   maintenance_calories: 2700,
+  resting_calories: null, // when set and active calories are logged, day maintenance = resting + active
   protein_target: 160,
   carb_target: 220,
   fat_target: 70,

@@ -16,6 +16,8 @@ alter table user_settings enable row level security;
 drop policy if exists "own settings" on user_settings;
 create policy "own settings" on user_settings
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+-- 003_activity
+alter table user_settings add column if not exists resting_calories int; -- kcal/day; null = not set
 
 -- ---------- gym ----------
 create table if not exists exercises (
@@ -89,6 +91,20 @@ drop policy if exists "own food" on food_entries;
 create policy "own food" on food_entries
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 create index if not exists food_entries_date_idx on food_entries (user_id, date);
+
+-- 003_activity: active calories per day. When set, that day's maintenance = resting + active.
+create table if not exists daily_activity (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  date date not null,
+  active_calories int not null,
+  created_at timestamptz not null default now(),
+  unique (user_id, date)
+);
+alter table daily_activity enable row level security;
+drop policy if exists "own activity" on daily_activity;
+create policy "own activity" on daily_activity
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 -- ---------- progress ----------
 create table if not exists weigh_ins (

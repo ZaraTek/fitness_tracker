@@ -379,3 +379,9 @@ code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
 @media (max-width: 380px) { .micros { grid-template-columns: 1fr; } }
 .micros + p { margin-top: 14px; }
 .entry-actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+/* active calories row in the daily summary */
+.active-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 10px; }
+.active-row .link { padding-left: 0; }
+.active-form { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
+.active-form input { flex: 1; min-width: 0; }

@@ -9,7 +9,7 @@ export const supabase = isConfigured ? createClient(url, key) : null
 // Friendly message for missing tables/columns (migration not run yet).
 export function explain(error) {
   if (!error) return ''
-  if (['PGRST205', '42703', '42P01'].includes(error.code)) {
+  if (['PGRST204', 'PGRST205', '42703', '42P01'].includes(error.code)) {
     return 'Database is out of date: run supabase/schema.sql in the Supabase SQL Editor.'
   }
   return error.message
