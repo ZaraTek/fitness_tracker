@@ -21,7 +21,7 @@ export default function Calories({ settings, saveSettings }) {
       .from('food_entries')
       .select('*')
       .eq('date', date)
-      .order('created_at')
+      .order('created_at', { ascending: false })
     if (error) return setError(explain(error))
     setError('')
     setEntries(data)
@@ -78,7 +78,7 @@ export default function Calories({ settings, saveSettings }) {
       setError(explain(error))
       return null
     }
-    setEntries((e) => [...e, data])
+    setEntries((e) => [data, ...e])
     return data
   }
 
