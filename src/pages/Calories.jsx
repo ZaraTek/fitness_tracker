@@ -123,6 +123,13 @@ export default function Calories({ settings, saveSettings }) {
       </div>
       {error && <div className="error">{error}</div>}
 
+      <FoodChat
+        onSave={save}
+        onRemove={remove}
+        context={`${Math.round(total.calories)} of ${settings.calorie_target} kcal eaten; protein ${Math.round(total.protein)}/${settings.protein_target} g, carbs ${Math.round(total.carbs)}/${settings.carb_target} g, fat ${Math.round(total.fat)}/${settings.fat_target} g.`}
+      />
+      <AddFood onSave={save} />
+
       <div className="card">
         <div className="big">
           {Math.round(total.calories)} <span className="muted small">/ {settings.calorie_target} kcal</span>
@@ -146,13 +153,6 @@ export default function Calories({ settings, saveSettings }) {
 
       <Micros total={total} />
       <WeekChart settings={settings} refreshKey={`${date}|${total.calories}|${active}`} />
-
-      <FoodChat
-        onSave={save}
-        onRemove={remove}
-        context={`${Math.round(total.calories)} of ${settings.calorie_target} kcal eaten; protein ${Math.round(total.protein)}/${settings.protein_target} g, carbs ${Math.round(total.carbs)}/${settings.carb_target} g, fat ${Math.round(total.fat)}/${settings.fat_target} g.`}
-      />
-      <AddFood onSave={save} />
 
       {entries.map((e) => (
         <EntryCard key={e.id} entry={e} onUpdate={(form) => update(e.id, form)} onRemove={() => remove(e.id)} />
