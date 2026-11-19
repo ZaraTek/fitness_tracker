@@ -74,6 +74,9 @@ export default function WeekChart({ settings, refreshKey }) {
   const weekTotal = logged.reduce((s, d) => s + d.deficit, 0)
   const unit = settings.unit === 'kg' ? 'kg' : 'lb'
   const weight = Math.abs(weekTotal) / KCAL_PER[unit]
+  // Daily average over every finished day; days with nothing tracked count as eating at maintenance (0).
+  const finished = days.filter((d) => d.date < today).length
+  const avg = finished ? Math.round(weekTotal / finished) : 0
 
   // Default selection: the last finished day with food logged.
   const sel = days.find((d) => d.date === picked) ?? logged.at(-1) ?? null
@@ -120,7 +123,14 @@ export default function WeekChart({ settings, refreshKey }) {
               {Math.abs(weekTotal).toLocaleString()} kcal {weekTotal >= 0 ? 'deficit' : 'surplus'}
             </b>{' '}
             <span className="muted">
-              ≈ {weight.toFixed(1)} {unit} · {logged.length} day{logged.length === 1 ? '' : 's'} logged
+              ≈ {weight.toFixed(1)} {unit}
+            </span>
+            <br />
+            <span className="muted">
+              avg <b className={avg >= 0 ? 'good' : 'warn'}>{avg > 0 ? '−' : avg < 0 ? '+' : ''}{Math.abs(avg)}</b>/day
+              {' · '}
+              {logged.length} of {finished} day{finished === 1 ? '' : 's'} tracked
+              {logged.length < finished && ', untracked days counted at maintenance'}
             </span>
           </>
         )}
