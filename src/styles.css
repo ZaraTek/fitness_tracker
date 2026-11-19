@@ -385,3 +385,24 @@ code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
 .active-row .link { padding-left: 0; }
 .active-form { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; }
 .active-form input { flex: 1; min-width: 0; }
+
+/* weekly deficit chart */
+.week .datenav { margin: 0 0 6px; }
+.week-total { margin: 0 0 4px; }
+.week-chart { display: block; margin: 4px 0 6px; overflow: visible; }
+.wk-day { cursor: pointer; }
+.wk-bar { transition: opacity 0.15s var(--ease); }
+.wk-bar.deficit { fill: var(--accent-strong); }
+.wk-bar.surplus { fill: var(--warn); }
+.week-chart:has(.wk-day.on) .wk-day:not(.on) .wk-bar { opacity: 0.45; }
+.wk-day:hover .wk-bar { opacity: 1 !important; }
+.wk-zero { stroke: var(--line-hi); stroke-width: 1; }
+.wk-empty { fill: var(--line-hi); }
+.wk-label { fill: var(--muted); font-size: 10px; }
+.wk-label.today { fill: var(--text); font-weight: 700; }
+.wk-value { fill: var(--text); font-size: 10px; font-weight: 600; }
+.wk-detail { margin: 0 0 4px; }
+.wk-key { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.swatch.deficit { background: var(--accent-strong); }
+.swatch.surplus { background: var(--warn); }

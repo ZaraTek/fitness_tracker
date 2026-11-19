@@ -3,6 +3,7 @@ import { supabase, explain } from '../supabase'
 import { toDateStr, addDays, prettyDate } from '../dates'
 import { resizeToBase64 } from '../image'
 import FoodChat from './FoodChat'
+import WeekChart, { dayMaintenance } from './WeekChart'
 import { MICROS, ALL_NUMERIC, BASE_NUMERIC } from '../nutrients'
 
 const NUM = ALL_NUMERIC
@@ -108,7 +109,7 @@ export default function Calories({ settings, saveSettings }) {
   // With a resting burn set and active calories logged, the day's maintenance is resting + active.
   const resting = Number(settings.resting_calories) || 0
   const fromActivity = resting > 0 && active !== null
-  const maintenance = fromActivity ? resting + active : settings.maintenance_calories
+  const maintenance = dayMaintenance(settings, active)
   const balance = Math.round(total.calories - maintenance)
   const remaining = Math.round(settings.calorie_target - total.calories)
 
@@ -144,6 +145,7 @@ export default function Calories({ settings, saveSettings }) {
       </div>
 
       <Micros total={total} />
+      <WeekChart settings={settings} refreshKey={`${date}|${total.calories}|${active}`} />
 
       <FoodChat
         onSave={save}
