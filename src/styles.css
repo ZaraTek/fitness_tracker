@@ -400,7 +400,8 @@ code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
 .wk-empty { fill: var(--line-hi); }
 .wk-label { fill: var(--muted); font-size: 10px; }
 .wk-label.today { fill: var(--text); font-weight: 700; }
-.wk-value { fill: var(--text); font-size: 10px; font-weight: 600; }
+.wk-value { fill: var(--muted); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wk-value.on { fill: var(--text); }
 .wk-detail { margin: 0 0 4px; }
 .wk-key { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }

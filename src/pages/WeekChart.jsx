@@ -63,9 +63,9 @@ export default function WeekChart({ settings, refreshKey }) {
         const eaten = rows.food[date]
         const active = rows.active[date] ?? null
         const burn = dayMaintenance(settings, active)
-        // Positive = deficit. Days with no food logged have no value.
-        const deficit = eaten === undefined ? null : Math.round(burn - eaten)
-        return { date, eaten, active, burn, deficit, future: date > today }
+        // Positive = deficit. Days with no food logged, and today (not over yet), have no value.
+        const deficit = eaten === undefined || date >= today ? null : Math.round(burn - eaten)
+        return { date, eaten, active, burn, deficit, future: date > today, inProgress: date === today }
       }),
     [start, rows, settings, today],
   )
@@ -75,17 +75,17 @@ export default function WeekChart({ settings, refreshKey }) {
   const unit = settings.unit === 'kg' ? 'kg' : 'lb'
   const weight = Math.abs(weekTotal) / KCAL_PER[unit]
 
-  // Default selection: today on the current week, else the last logged day.
-  const sel = days.find((d) => d.date === picked) ?? (isCurrent ? days.find((d) => d.date === today) : logged.at(-1)) ?? null
+  // Default selection: the last finished day with food logged.
+  const sel = days.find((d) => d.date === picked) ?? logged.at(-1) ?? null
 
   // Chart geometry. Symmetric-ish domain that always includes zero.
   const W = 320
   const H = 150
-  const top = 14
-  const bottom = 24
   const vals = logged.map((d) => d.deficit)
   const hi = Math.max(250, ...vals)
   const lo = Math.min(0, ...vals)
+  const top = 16 // room for value labels above deficit bars
+  const bottom = lo < 0 ? 38 : 24 // weekday labels, plus value labels under surplus bars
   const span = hi - lo
   const y = (v) => top + ((hi - v) / span) * (H - top - bottom)
   const y0 = y(0)
@@ -113,7 +113,7 @@ export default function WeekChart({ settings, refreshKey }) {
 
       <p className="small week-total">
         {logged.length === 0 ? (
-          <span className="muted">No food logged this week.</span>
+          <span className="muted">No finished days logged this week yet.</span>
         ) : (
           <>
             <b className={weekTotal >= 0 ? 'good' : 'warn'}>
@@ -141,14 +141,15 @@ export default function WeekChart({ settings, refreshKey }) {
                   className={d.deficit > 0 ? 'wk-bar deficit' : 'wk-bar surplus'}
                 />
               )}
-              {(d.deficit === 0 || (d.deficit === null && !d.future)) && <circle cx={x + bw / 2} cy={y0} r={2} className="wk-empty" />}
-              {on && d.deficit !== null && (
+              {(d.deficit === 0 || (d.deficit === null && !d.future && !d.inProgress)) && <circle cx={x + bw / 2} cy={y0} r={2} className="wk-empty" />}
+              {d.deficit !== null && (
                 <text
                   x={x + bw / 2}
                   y={d.deficit >= 0 ? y(d.deficit) - 4 : y(d.deficit) + 11}
-                  className="wk-value"
+                  className={'wk-value' + (on ? ' on' : '')}
                   textAnchor="middle"
                 >
+                  {d.deficit > 0 ? '−' : d.deficit < 0 ? '+' : ''}
                   {Math.abs(d.deficit)}
                 </text>
               )}
@@ -166,7 +167,13 @@ export default function WeekChart({ settings, refreshKey }) {
           <b className="plain">{parseDate(sel.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</b>
           {' · '}
           {sel.deficit === null ? (
-            sel.future ? 'upcoming' : 'nothing logged'
+            sel.future ? (
+              'upcoming'
+            ) : sel.inProgress ? (
+              `in progress${sel.eaten !== undefined ? ` · ${Math.round(sel.eaten)} eaten so far` : ''} · counts once the day is over`
+            ) : (
+              'nothing logged'
+            )
           ) : (
             <>
               ate {Math.round(sel.eaten)} · burned {sel.burn}
